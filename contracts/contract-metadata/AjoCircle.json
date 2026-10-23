@@ -1,0 +1,973 @@
+{
+  "contractAddress": "0xdcef975947fc86f344164dab25af4aaaceb9f0ca",
+  "network": "ARC-TESTNET",
+  "deployerWalletId": "3c2464b2-8369-52e2-a782-800bbeca5396",
+  "contract_code_path": "/home/user/app/contracts/AjoCircle.sol",
+  "contract_compiled_code_path": "/home/user/app/contracts/out/AjoCircle.sol/AjoCircle.json",
+  "contract_network_and_links": {
+    "Arc Testnet": "https://explorer.testnet.arc.io/address/0xdcef975947fc86f344164dab25af4aaaceb9f0ca"
+  },
+  "contract_deployments": [
+    {
+      "chain": "Arc Testnet",
+      "address": "0xdcef975947fc86f344164dab25af4aaaceb9f0ca",
+      "explorerUrl": "https://explorer.testnet.arc.io/address/0xdcef975947fc86f344164dab25af4aaaceb9f0ca",
+      "txHash": "0xd903bd0303f5d9c6bcb00094b38d6a5d4ffa5b183289c39c5b7b8756a9f28106",
+      "deployedAt": "2026-10-21T19:58:38.116Z"
+    }
+  ],
+  "abi": [
+    {
+      "type": "function",
+      "name": "MIN_ROUND_DURATION",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "USDC",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "",
+          "type": "address",
+          "internalType": "address"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "cancelCircle",
+      "inputs": [
+        {
+          "name": "circleId",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "circleCount",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "circles",
+      "inputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "name",
+          "type": "string",
+          "internalType": "string"
+        },
+        {
+          "name": "creator",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "contributionAmount",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "memberCount",
+          "type": "uint8",
+          "internalType": "uint8"
+        },
+        {
+          "name": "roundDuration",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "status",
+          "type": "uint8",
+          "internalType": "enum AjoCircle.CircleStatus"
+        },
+        {
+          "name": "currentRound",
+          "type": "uint8",
+          "internalType": "uint8"
+        },
+        {
+          "name": "roundDeadline",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "collateralSlashed",
+      "inputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "",
+          "type": "address",
+          "internalType": "address"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "bool",
+          "internalType": "bool"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "contribute",
+      "inputs": [
+        {
+          "name": "circleId",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "createCircle",
+      "inputs": [
+        {
+          "name": "name",
+          "type": "string",
+          "internalType": "string"
+        },
+        {
+          "name": "contributionAmount",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "memberCount",
+          "type": "uint8",
+          "internalType": "uint8"
+        },
+        {
+          "name": "roundDuration",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "circleId",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "getCircle",
+      "inputs": [
+        {
+          "name": "circleId",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "tuple",
+          "internalType": "struct AjoCircle.Circle",
+          "components": [
+            {
+              "name": "name",
+              "type": "string",
+              "internalType": "string"
+            },
+            {
+              "name": "creator",
+              "type": "address",
+              "internalType": "address"
+            },
+            {
+              "name": "contributionAmount",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "memberCount",
+              "type": "uint8",
+              "internalType": "uint8"
+            },
+            {
+              "name": "roundDuration",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "status",
+              "type": "uint8",
+              "internalType": "enum AjoCircle.CircleStatus"
+            },
+            {
+              "name": "currentRound",
+              "type": "uint8",
+              "internalType": "uint8"
+            },
+            {
+              "name": "roundDeadline",
+              "type": "uint256",
+              "internalType": "uint256"
+            },
+            {
+              "name": "members",
+              "type": "address[]",
+              "internalType": "address[]"
+            },
+            {
+              "name": "payoutRecipients",
+              "type": "address[]",
+              "internalType": "address[]"
+            },
+            {
+              "name": "defaulted",
+              "type": "bool[]",
+              "internalType": "bool[]"
+            }
+          ]
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "getCurrentRound",
+      "inputs": [
+        {
+          "name": "circleId",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "uint8",
+          "internalType": "uint8"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "getMemberDefaulted",
+      "inputs": [
+        {
+          "name": "circleId",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "member",
+          "type": "address",
+          "internalType": "address"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "bool",
+          "internalType": "bool"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "getMembers",
+      "inputs": [
+        {
+          "name": "circleId",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "address[]",
+          "internalType": "address[]"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "getNextRecipient",
+      "inputs": [
+        {
+          "name": "circleId",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "address",
+          "internalType": "address"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "getPayoutRecipients",
+      "inputs": [
+        {
+          "name": "circleId",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "address[]",
+          "internalType": "address[]"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "getPotSize",
+      "inputs": [
+        {
+          "name": "circleId",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "getRoundDeadline",
+      "inputs": [
+        {
+          "name": "circleId",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "getRoundPaidStatus",
+      "inputs": [
+        {
+          "name": "circleId",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "round",
+          "type": "uint8",
+          "internalType": "uint8"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "paidStatus",
+          "type": "bool[]",
+          "internalType": "bool[]"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "hasMemberPaid",
+      "inputs": [
+        {
+          "name": "circleId",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "member",
+          "type": "address",
+          "internalType": "address"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "bool",
+          "internalType": "bool"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "isDefaulted",
+      "inputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "",
+          "type": "address",
+          "internalType": "address"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "bool",
+          "internalType": "bool"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "isMember",
+      "inputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "",
+          "type": "address",
+          "internalType": "address"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "bool",
+          "internalType": "bool"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "join",
+      "inputs": [
+        {
+          "name": "circleId",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "memberIndex",
+      "inputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "",
+          "type": "address",
+          "internalType": "address"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "payout",
+      "inputs": [
+        {
+          "name": "circleId",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "pendingWithdrawals",
+      "inputs": [
+        {
+          "name": "",
+          "type": "address",
+          "internalType": "address"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "roundPaid",
+      "inputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "",
+          "type": "uint8",
+          "internalType": "uint8"
+        },
+        {
+          "name": "",
+          "type": "address",
+          "internalType": "address"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "bool",
+          "internalType": "bool"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "withdraw",
+      "inputs": [],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "event",
+      "name": "CircleCancelled",
+      "inputs": [
+        {
+          "name": "circleId",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "CircleCreated",
+      "inputs": [
+        {
+          "name": "circleId",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "creator",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "indexed": false,
+          "internalType": "string"
+        },
+        {
+          "name": "contributionAmount",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        },
+        {
+          "name": "memberCount",
+          "type": "uint8",
+          "indexed": false,
+          "internalType": "uint8"
+        },
+        {
+          "name": "roundDuration",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "CircleEnded",
+      "inputs": [
+        {
+          "name": "circleId",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "CircleStarted",
+      "inputs": [
+        {
+          "name": "circleId",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "roundDeadline",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "CollateralRefunded",
+      "inputs": [
+        {
+          "name": "circleId",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "member",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
+          "name": "amount",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "CollateralSlashed",
+      "inputs": [
+        {
+          "name": "circleId",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "member",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
+          "name": "amount",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "ContributionMade",
+      "inputs": [
+        {
+          "name": "circleId",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "round",
+          "type": "uint8",
+          "indexed": true,
+          "internalType": "uint8"
+        },
+        {
+          "name": "member",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
+          "name": "amount",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "MemberDefaulted",
+      "inputs": [
+        {
+          "name": "circleId",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "member",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
+          "name": "round",
+          "type": "uint8",
+          "indexed": false,
+          "internalType": "uint8"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "MemberJoined",
+      "inputs": [
+        {
+          "name": "circleId",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "member",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
+          "name": "position",
+          "type": "uint8",
+          "indexed": false,
+          "internalType": "uint8"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "RoundPayout",
+      "inputs": [
+        {
+          "name": "circleId",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "round",
+          "type": "uint8",
+          "indexed": true,
+          "internalType": "uint8"
+        },
+        {
+          "name": "recipient",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
+          "name": "amount",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "Withdrawn",
+      "inputs": [
+        {
+          "name": "recipient",
+          "type": "address",
+          "indexed": true,
+          "internalType": "address"
+        },
+        {
+          "name": "amount",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "error",
+      "name": "AlreadyContributed",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "AlreadyMember",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "CircleEndedAlready",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "CircleFull",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "CircleNotActive",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "CircleNotPending",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "ContributionsStillPending",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "InvalidCircle",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "InvalidContributionAmount",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "InvalidMemberCount",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "InvalidRoundDuration",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "MemberDefaultedAlready",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "NotCreator",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "NotMember",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "NothingToWithdraw",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "ReentrancyGuardReentrantCall",
+      "inputs": []
+    },
+    {
+      "type": "error",
+      "name": "SafeERC20FailedOperation",
+      "inputs": [
+        {
+          "name": "token",
+          "type": "address",
+          "internalType": "address"
+        }
+      ]
+    }
+  ]
+}
