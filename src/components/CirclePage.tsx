@@ -1,15 +1,16 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAccount, useWriteContract, useWaitForTransactionReceipt, useSwitchChain } from 'wagmi';
-import { erc20Abi } from 'viem';
 import { toast } from 'sonner';
 import {
   ArrowLeft, Copy, Check, ExternalLink, Clock, ChevronDown, ChevronUp,
   Loader2, CircleDollarSign, AlertTriangle,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { AJO_ADDRESS, AJO_ABI, AJO_CHAIN_ID, USDC_ADDRESS } from '@/lib/ajo-contract';
+import { AJO_ADDRESS, AJO_ABI, AJO_CHAIN_ID } from '@/lib/ajo-contract';
 import { formatUsdc, shortAddr, formatCountdown } from '@/lib/format';
 import { publicClient } from '@/lib/publicClient';
+
+const NATIVE_SCALE = 1_000_000_000_000n; // 1e12: convert 6-dec USDC amounts to 18-dec native msg.value
 
 const ZERO_ADDR = '0x0000000000000000000000000000000000000000';
 const LOAD_TIMEOUT_MS = 10_000;
@@ -44,12 +45,20 @@ interface CircleData {
   contributionAmount: bigint;
   memberCount: number;
   roundDuration: bigint;
+  collateralAmount: bigint;
+  holdbackBps: number;
   status: number;
   currentRound: number;
   roundDeadline: bigint;
   members: readonly string[];
   payoutRecipients: readonly string[];
   defaulted: readonly boolean[];
+}
+
+interface MemberReputation {
+  paid: bigint;
+  missed: bigint;
+  completed: bigint;
 }
 
 interface CirclePageProps {
@@ -74,8 +83,9 @@ export function CirclePage({ circleId, onBack }: CirclePageProps) {
   const [nextRecipient, setNextRecipient] = useState<string | null>(null);
   const [potSize, setPotSize] = useState<bigint | null>(null);
   const [pendingWithdrawal, setPendingWithdrawal] = useState<bigint | null>(null);
-  const [allowance, setAllowance] = useState<bigint | null>(null);
   const [isMember, setIsMember] = useState<boolean>(false);
+  const [memberHoldbacks, setMemberHoldbacks] = useState<Record<string, bigint>>({});
+  const [memberReputations, setMemberReputations] = useState<Record<string, MemberReputation>>({});
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -124,7 +134,9 @@ export function CirclePage({ circleId, onBack }: CirclePageProps) {
 
       const c = rawCircle as {
         name: string; creator: string; contributionAmount: bigint;
-        memberCount: bigint | number; roundDuration: bigint; status: bigint | number;
+        memberCount: bigint | number; roundDuration: bigint; collateralAmount: bigint;
+        holdbackBps: bigint | number;
+        status: bigint | number;
         currentRound: bigint | number; roundDeadline: bigint;
         members: readonly string[]; payoutRecipients: readonly string[];
         defaulted: readonly boolean[];
@@ -135,6 +147,8 @@ export function CirclePage({ circleId, onBack }: CirclePageProps) {
         contributionAmount: c.contributionAmount,
         memberCount: Number(c.memberCount),
         roundDuration: c.roundDuration,
+        collateralAmount: c.collateralAmount,
+        holdbackBps: Number(c.holdbackBps),
         status: Number(c.status),
         currentRound: Number(c.currentRound),
         roundDeadline: c.roundDeadline,
@@ -205,18 +219,6 @@ export function CirclePage({ circleId, onBack }: CirclePageProps) {
 
         parallelReads.push(
           publicClient.readContract({
-            address: USDC_ADDRESS,
-            abi: erc20Abi,
-            functionName: 'allowance',
-            args: [address, AJO_ADDRESS],
-          }).then((v) => {
-            console.log('[CirclePage] allowance ok', v);
-            setAllowance(v);
-          }).catch((e) => console.warn('[CirclePage] allowance failed', e))
-        );
-
-        parallelReads.push(
-          publicClient.readContract({
             address: AJO_ADDRESS,
             abi: AJO_ABI,
             functionName: 'isMember',
@@ -227,6 +229,48 @@ export function CirclePage({ circleId, onBack }: CirclePageProps) {
           }).catch((e) => console.warn('[CirclePage] isMember failed', e))
         );
       }
+
+      // Fetch holdbacks for all members
+      if (circleData.status === 1 || circleData.status === 2) {
+        parallelReads.push(
+          Promise.all(
+            c.members.map((m) =>
+              publicClient.readContract({
+                address: AJO_ADDRESS,
+                abi: AJO_ABI,
+                functionName: 'getMemberHoldback',
+                args: [circleId, m as `0x${string}`],
+              }).then((v) => ({ addr: m, holdback: v }))
+                .catch(() => ({ addr: m, holdback: 0n }))
+            )
+          ).then((results) => {
+            const map: Record<string, bigint> = {};
+            for (const { addr, holdback } of results) map[addr.toLowerCase()] = holdback;
+            setMemberHoldbacks(map);
+          })
+        );
+      }
+
+      // Fetch reputation for all members
+      parallelReads.push(
+        Promise.all(
+          c.members.map((m) =>
+            publicClient.readContract({
+              address: AJO_ADDRESS,
+              abi: AJO_ABI,
+              functionName: 'getMemberReputation',
+              args: [m as `0x${string}`],
+            }).then((v) => {
+              const [paid, missed, completed] = v as [bigint, bigint, bigint];
+              return { addr: m, rep: { paid, missed, completed } };
+            }).catch(() => ({ addr: m, rep: { paid: 0n, missed: 0n, completed: 0n } }))
+          )
+        ).then((results) => {
+          const map: Record<string, MemberReputation> = {};
+          for (const { addr, rep } of results) map[addr.toLowerCase()] = rep;
+          setMemberReputations(map);
+        })
+      );
 
       await Promise.all(parallelReads);
       setLoadError(null);
@@ -263,13 +307,6 @@ export function CirclePage({ circleId, onBack }: CirclePageProps) {
   }, [circleId, address]);
 
   const refetchAll = useCallback(() => { void fetchData(); }, [fetchData]);
-
-  // Approve
-  const { writeContract: writeApprove, data: approveTxHash, isPending: isApprovePending } = useWriteContract();
-  const { isLoading: isApproveConfirming, isSuccess: isApproveSuccess } = useWaitForTransactionReceipt({ hash: approveTxHash });
-  const prevApproveRef = useRef(false);
-  if (isApproveSuccess && !prevApproveRef.current) { prevApproveRef.current = true; toast.success('Approval confirmed'); refetchAll(); }
-  if (!isApproveSuccess) prevApproveRef.current = false;
 
   // Join
   const { writeContract: writeJoin, data: joinTxHash, isPending: isJoinPending } = useWriteContract();
@@ -352,9 +389,19 @@ export function CirclePage({ circleId, onBack }: CirclePageProps) {
 
   const userIndex = members.findIndex((m) => m.toLowerCase() === address?.toLowerCase());
   const userHasPaid = paidStatus && userIndex >= 0 ? paidStatus[userIndex] : false;
-  const needsApproval =
-    circle.contributionAmount > 0n &&
-    (allowance == null || allowance < circle.contributionAmount);
+
+  // Early payout: true when every non-defaulted, non-recipient member has paid this round
+  const roundRecipient = isActive && currentRound > 0 ? (circle.payoutRecipients[currentRound - 1] ?? null) : null;
+  const allRequiredPaid = isActive && paidStatus != null && members.length > 0 && (() => {
+    for (let i = 0; i < members.length; i++) {
+      const m = members[i];
+      if (roundRecipient && m.toLowerCase() === roundRecipient.toLowerCase()) continue; // exempt
+      if (circle.defaulted[i]) continue; // already excluded
+      if (!paidStatus[i]) return false;
+    }
+    return true;
+  })();
+  const earlyPayoutReady = allRequiredPaid && !pastDeadline;
 
   const explorerBase = 'https://explorer.testnet.arc.io';
 
@@ -364,27 +411,19 @@ export function CirclePage({ circleId, onBack }: CirclePageProps) {
     fn();
   }
 
-  function handleApprove() {
-    ensureChain(() => writeApprove({
-      address: USDC_ADDRESS,
-      abi: erc20Abi,
-      functionName: 'approve',
-      args: [AJO_ADDRESS, circle!.contributionAmount * BigInt(memberCount + 5)],
-      chainId: AJO_CHAIN_ID,
-    }));
-  }
-
   function handleJoin() {
+    if (!circle) return;
     ensureChain(() => {
-      if (needsApproval) { handleApprove(); return; }
-      writeJoin({ address: AJO_ADDRESS, abi: AJO_ABI, functionName: 'join', args: [circleId], chainId: AJO_CHAIN_ID });
+      const collateralValue = circle.collateralAmount * NATIVE_SCALE;
+      writeJoin({ address: AJO_ADDRESS, abi: AJO_ABI, functionName: 'join', args: [circleId], value: collateralValue, chainId: AJO_CHAIN_ID });
     });
   }
 
   function handleContribute() {
+    if (!circle) return;
     ensureChain(() => {
-      if (needsApproval) { handleApprove(); return; }
-      writeContribute({ address: AJO_ADDRESS, abi: AJO_ABI, functionName: 'contribute', args: [circleId], chainId: AJO_CHAIN_ID });
+      const contributeValue = circle.contributionAmount * NATIVE_SCALE;
+      writeContribute({ address: AJO_ADDRESS, abi: AJO_ABI, functionName: 'contribute', args: [circleId], value: contributeValue, chainId: AJO_CHAIN_ID });
     });
   }
 
@@ -401,7 +440,6 @@ export function CirclePage({ circleId, onBack }: CirclePageProps) {
   }
 
   const isBusy =
-    isApprovePending || isApproveConfirming ||
     isJoinPending || isJoinConfirming ||
     isContributePending || isContributeConfirming ||
     isPayoutPending || isPayoutConfirming ||
@@ -470,15 +508,20 @@ export function CirclePage({ circleId, onBack }: CirclePageProps) {
               Target: {formatUsdc(circle.contributionAmount * BigInt(members.length))} USDC
             </p>
           )}
-          {/* Circle settings row — contribution + collateral */}
+          {/* Circle settings row — contribution + collateral + holdback */}
           <div className="flex items-center gap-2 flex-wrap pt-1">
             <span className="rounded-full px-2.5 py-1 text-xs font-semibold" style={{ background: 'rgba(217,119,6,0.1)', color: '#92400e' }}>
               {formatUsdc(circle.contributionAmount)} USDC/round
             </span>
             <span className="rounded-full px-2.5 py-1 text-xs font-semibold" style={{ background: 'rgba(18,45,69,0.06)', color: 'var(--muted)' }}>
-              {circle.contributionAmount > 0n
-                ? `${formatUsdc(circle.contributionAmount)} USDC deposit`
+              {circle.collateralAmount > 0n
+                ? `${formatUsdc(circle.collateralAmount)} USDC deposit`
                 : 'No collateral'}
+            </span>
+            <span className="rounded-full px-2.5 py-1 text-xs font-semibold" style={{ background: 'rgba(18,45,69,0.06)', color: 'var(--muted)' }}>
+              {circle.holdbackBps === 0
+                ? 'Friends mode'
+                : `${(circle.holdbackBps / 100).toFixed(0)}% holdback`}
             </span>
           </div>
         </div>
@@ -486,15 +529,19 @@ export function CirclePage({ circleId, onBack }: CirclePageProps) {
         {isActive && deadlineSecs > 0 && (
           <div
             className="rounded-2xl p-3 flex items-center gap-3"
-            style={{ ...glass.inner, borderColor: pastDeadline ? 'rgba(186,43,76,0.2)' : 'rgba(255,255,255,0.56)' }}
+            style={{
+              ...glass.inner,
+              borderColor: earlyPayoutReady ? 'rgba(5,150,105,0.35)' : pastDeadline ? 'rgba(186,43,76,0.2)' : 'rgba(255,255,255,0.56)',
+              background: earlyPayoutReady ? 'rgba(5,150,105,0.07)' : undefined,
+            }}
           >
-            <Clock className="size-4 shrink-0" style={{ color: pastDeadline ? '#ba2b4c' : '#d97706' }} />
+            <Clock className="size-4 shrink-0" style={{ color: earlyPayoutReady ? '#059669' : pastDeadline ? '#ba2b4c' : '#d97706' }} />
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-semibold tabular-nums" style={{ color: pastDeadline ? '#ba2b4c' : 'var(--ink)' }}>
-                {pastDeadline ? 'Deadline passed' : formatCountdown(secondsLeft)}
+              <p className="text-xs font-semibold tabular-nums" style={{ color: earlyPayoutReady ? '#059669' : pastDeadline ? '#ba2b4c' : 'var(--ink)' }}>
+                {earlyPayoutReady ? 'Everyone has paid — payout ready' : pastDeadline ? 'Deadline passed' : formatCountdown(secondsLeft)}
               </p>
               <p className="text-xs" style={{ color: 'var(--subtle)' }}>
-                {pastDeadline ? 'Payout can be triggered now' : 'until payout opens early'}
+                {earlyPayoutReady ? 'Trigger the payout now or wait for the deadline' : pastDeadline ? 'Payout can be triggered now' : 'until payout opens early'}
               </p>
             </div>
           </div>
@@ -521,7 +568,7 @@ export function CirclePage({ circleId, onBack }: CirclePageProps) {
             className="rounded-2xl px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-40"
             style={{ background: '#059669' }}
           >
-            {isWithdrawPending ? 'Confirm...' : isWithdrawConfirming ? 'Withdrawing...' : 'Withdraw'}
+            {isWithdrawPending ? 'Waiting for wallet…' : isWithdrawConfirming ? 'Withdrawing…' : 'Withdraw'}
           </button>
         </motion.div>
       )}
@@ -595,17 +642,42 @@ export function CirclePage({ circleId, onBack }: CirclePageProps) {
                     {isNextRcpt ? ' · Next to receive' : ''}
                   </p>
                 </div>
-                {isActive && (
-                  <span
-                    className="rounded-full px-2 py-0.5 text-xs font-semibold"
-                    style={{
-                      background: paid ? 'rgba(5,150,105,0.12)' : 'rgba(18,45,69,0.06)',
-                      color: paid ? '#059669' : 'var(--subtle)',
-                    }}
-                  >
-                    {paid ? 'Paid' : 'Unpaid'}
-                  </span>
-                )}
+                <div className="flex flex-col items-end gap-1 shrink-0">
+                  {isActive && (
+                    <span
+                      className="rounded-full px-2 py-0.5 text-xs font-semibold"
+                      style={{
+                        background: paid ? 'rgba(5,150,105,0.12)' : 'rgba(18,45,69,0.06)',
+                        color: paid ? '#059669' : 'var(--subtle)',
+                      }}
+                    >
+                      {paid ? 'Paid' : 'Unpaid'}
+                    </span>
+                  )}
+                  {(() => {
+                    const hb = memberHoldbacks[member.toLowerCase()];
+                    if (hb && hb > 0n) {
+                      return (
+                        <span className="rounded-full px-2 py-0.5 text-xs font-semibold" style={{ background: 'rgba(217,119,6,0.1)', color: '#92400e' }}>
+                          {formatUsdc(hb)} held
+                        </span>
+                      );
+                    }
+                    return null;
+                  })()}
+                  {(() => {
+                    const rep = memberReputations[member.toLowerCase()];
+                    if (!rep) return null;
+                    const completed = Number(rep.completed);
+                    const missed = Number(rep.missed);
+                    if (completed === 0 && missed === 0) return null;
+                    return (
+                      <span className="rounded-full px-2 py-0.5 text-xs" style={{ color: 'var(--subtle)' }}>
+                        {completed > 0 ? `✓ ${completed}` : ''}{completed > 0 && missed > 0 ? ' · ' : ''}{missed > 0 ? `✗ ${missed}` : ''}
+                      </span>
+                    );
+                  })()}
+                </div>
                 {isNextRcpt && isActive && (
                   <CircleDollarSign className="size-4 shrink-0" style={{ color: '#d97706' }} />
                 )}
@@ -680,7 +752,7 @@ export function CirclePage({ circleId, onBack }: CirclePageProps) {
                   <div className="flex justify-between text-xs">
                     <span style={{ color: 'var(--subtle)' }}>Security deposit (locked now)</span>
                     <span className="font-semibold tabular-nums" style={{ color: 'var(--ink)' }}>
-                      {circle.contributionAmount > 0n ? `${formatUsdc(circle.contributionAmount)} USDC` : 'None'}
+                      {circle.collateralAmount > 0n ? `${formatUsdc(circle.collateralAmount)} USDC` : 'None'}
                     </span>
                   </div>
                   <div className="flex justify-between text-xs">
@@ -692,7 +764,7 @@ export function CirclePage({ circleId, onBack }: CirclePageProps) {
                   <div className="flex justify-between text-xs border-t pt-1" style={{ borderColor: 'rgba(217,119,6,0.15)' }}>
                     <span className="font-semibold" style={{ color: '#92400e' }}>You lock today</span>
                     <span className="font-bold tabular-nums" style={{ color: '#92400e' }}>
-                      {formatUsdc(circle.contributionAmount)} USDC
+                      {formatUsdc(circle.collateralAmount)} USDC
                     </span>
                   </div>
                 </div>
@@ -706,7 +778,7 @@ export function CirclePage({ circleId, onBack }: CirclePageProps) {
               className="w-full rounded-2xl py-3.5 text-sm font-semibold text-white disabled:opacity-40"
               style={{ background: 'linear-gradient(135deg, #d97706 0%, #059669 100%)' }}
             >
-              {isJoinPending ? 'Confirm in wallet...' : isJoinConfirming ? 'Joining...' : needsApproval ? 'Allow USDC & Join' : 'Join circle'}
+              {isJoinPending ? 'Waiting for wallet…' : isJoinConfirming ? 'Joining…' : circle.collateralAmount > 0n ? `Join (send ${formatUsdc(circle.collateralAmount)} USDC deposit)` : 'Join circle'}
             </button>
             </>
           )}
@@ -728,9 +800,8 @@ export function CirclePage({ circleId, onBack }: CirclePageProps) {
               className="w-full rounded-2xl py-3.5 text-sm font-semibold text-white disabled:opacity-40"
               style={{ background: 'linear-gradient(135deg, #d97706 0%, #059669 100%)' }}
             >
-              {isContributePending ? 'Confirm in wallet...' :
-                isContributeConfirming ? 'Confirming...' :
-                needsApproval ? 'Allow USDC & Contribute' :
+              {isContributePending ? 'Waiting for wallet…' :
+                isContributeConfirming ? 'Confirming…' :
                 `Contribute ${formatUsdc(circle.contributionAmount)} USDC`}
             </button>
           )}
@@ -754,28 +825,26 @@ export function CirclePage({ circleId, onBack }: CirclePageProps) {
           {isActive && (
             <button
               onClick={handlePayout}
-              disabled={isBusy || (!pastDeadline && !wrongChain)}
+              disabled={isBusy || (!pastDeadline && !earlyPayoutReady && !wrongChain)}
               className="w-full rounded-2xl py-3 text-sm font-semibold disabled:opacity-40"
-              style={{ background: 'rgba(255,255,255,0.6)', border: '1px solid rgba(18,45,69,0.12)', color: 'var(--ink)' }}
+              style={{
+                background: earlyPayoutReady || pastDeadline
+                  ? 'linear-gradient(135deg, #059669 0%, #047857 100%)'
+                  : 'rgba(255,255,255,0.6)',
+                border: earlyPayoutReady || pastDeadline ? 'none' : '1px solid rgba(18,45,69,0.12)',
+                color: earlyPayoutReady || pastDeadline ? 'white' : 'var(--ink)',
+              }}
             >
-              {isPayoutPending ? 'Confirm in wallet...' :
-                isPayoutConfirming ? 'Triggering payout...' :
+              {isPayoutPending ? 'Waiting for wallet…' :
+                isPayoutConfirming ? 'Triggering payout…' :
                 wrongChain ? 'Switch network & Trigger payout' :
+                earlyPayoutReady ? 'Trigger early payout' :
                 !pastDeadline ? 'Payout (opens after deadline)' :
                 'Trigger payout'}
             </button>
           )}
 
-          {isActive && needsApproval && !wrongChain && (
-            <button
-              onClick={handleApprove}
-              disabled={isBusy}
-              className="w-full rounded-2xl py-2.5 text-xs font-semibold disabled:opacity-40"
-              style={{ background: 'rgba(217,119,6,0.1)', color: '#d97706', border: '1px solid rgba(217,119,6,0.2)' }}
-            >
-              {isApprovePending ? 'Confirm approval...' : isApproveConfirming ? 'Confirming...' : 'Allow USDC first'}
-            </button>
-          )}
+
         </motion.section>
       )}
 

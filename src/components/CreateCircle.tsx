@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
-import { useAccount, useWriteContract, useWaitForTransactionReceipt, useReadContract, useSwitchChain } from 'wagmi';
-import { erc20Abi } from 'viem';
+import { useAccount, useWriteContract, useWaitForTransactionReceipt, useSwitchChain } from 'wagmi';
 import { publicClient } from '@/lib/publicClient';
-import { toast } from 'sonner';
-import { ArrowLeft, Copy, Check, Shield } from 'lucide-react';
+
+import { ArrowLeft, Copy, Check, Shield, Users } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { AJO_ADDRESS, AJO_ABI, AJO_CHAIN_ID, USDC_ADDRESS } from '@/lib/ajo-contract';
+import { AJO_ADDRESS, AJO_ABI, AJO_CHAIN_ID } from '@/lib/ajo-contract';
 import { parseUsdcInput, formatUsdc } from '@/lib/format';
+
+const NATIVE_SCALE = 1_000_000_000_000n; // 1e12: 6-dec USDC → 18-dec native msg.value
 
 const glass = {
   card: {
@@ -30,17 +31,23 @@ const DURATION_OPTIONS = [
   { label: '1 month', value: 2592000 },
 ];
 
+const TRUST_PRESETS = [
+  { label: 'Friends', subtitle: 'No holdback', bps: 0, color: '#059669' },
+  { label: 'Mixed', subtitle: '10% holdback', bps: 1000, color: '#d97706' },
+  { label: 'Strangers', subtitle: '25% holdback', bps: 2500, color: '#dc2626' },
+] as const;
+
 interface CreateCircleProps {
   onBack: () => void;
   onCreated: (circleId: bigint) => void;
 }
 
-// keccak256('CircleCreated(uint256,address,string,uint256,uint8,uint256)')
+// keccak256('CircleCreated(uint256,address,string,uint256,uint8,uint256,uint256,uint16)')
 const CIRCLE_CREATED_TOPIC =
-  '0xd333ebc5974fb8cf4bad87d6065783f241c24993e24e84935acee3fb4849c31e' as const;
+  '0x9f4e7741d49828a7bf83667891c5822e0e7f9d0e27e6cc5fbe67dcc04359d1fd' as const;
 
 export function CreateCircle({ onBack, onCreated }: CreateCircleProps) {
-  const { address, chainId } = useAccount();
+  const { chainId } = useAccount();
   const { switchChain } = useSwitchChain();
   const wrongChain = chainId !== AJO_CHAIN_ID;
 
@@ -49,21 +56,28 @@ export function CreateCircle({ onBack, onCreated }: CreateCircleProps) {
   const [memberCount, setMemberCount] = useState(3);
   const [roundDuration, setRoundDuration] = useState(604800);
   const [customDuration, setCustomDuration] = useState('');
-  // Collateral toggle — default OFF. When OFF, collateral = contribution amount (contract default).
-  // When ON, user sets a custom collateral amount (separate field).
+
+  // Collateral toggle
   const [collateralOn, setCollateralOn] = useState(false);
   const [collateralStr, setCollateralStr] = useState('');
+
+  // Trust level / holdback
+  const [selectedPreset, setSelectedPreset] = useState<0 | 1 | 2 | 3>(0); // 0-2 = presets, 3 = custom
+  const [customBpsStr, setCustomBpsStr] = useState('');
+
   const [createdId, setCreatedId] = useState<bigint | null>(null);
   const [shareLink, setShareLink] = useState('');
   const [copied, setCopied] = useState(false);
-  const [approvalDone, setApprovalDone] = useState(false);
-  const [toastShown, setToastShown] = useState(false);
 
   const contributionAmount = parseUsdcInput(contributionStr);
-  // Collateral: when toggle OFF → 0 (no collateral). When ON → use custom field or fallback to contribution.
   const collateralAmount = collateralOn
     ? (parseUsdcInput(collateralStr) ?? contributionAmount ?? 0n)
     : 0n;
+
+  // Resolve holdbackBps
+  const holdbackBps: number = selectedPreset === 3
+    ? Math.min(3000, Math.max(0, parseInt(customBpsStr) || 0))
+    : TRUST_PRESETS[selectedPreset].bps;
 
   const effectiveDuration = customDuration.trim()
     ? parseInt(customDuration) || roundDuration
@@ -76,37 +90,11 @@ export function CreateCircle({ onBack, onCreated }: CreateCircleProps) {
     memberCount >= 2 &&
     memberCount <= 10 &&
     effectiveDuration >= 300 &&
+    holdbackBps <= 3000 &&
     (!collateralOn || (parseUsdcInput(collateralStr) !== null && (parseUsdcInput(collateralStr) ?? 0n) > 0n));
 
-  // Total USDC needed at join: contribution (collateral deposit) + first round contribution.
-  // Contract charges contributionAmount at join as deposit, then contributionAmount per round.
-  // We need approval for: collateral (if any) + at least one round contribution.
-  const approvalNeeded = collateralAmount + (contributionAmount ?? 0n) * BigInt(memberCount + 5);
-
-  const { data: allowance, refetch: refetchAllowance } = useReadContract({
-    address: USDC_ADDRESS,
-    abi: erc20Abi,
-    functionName: 'allowance',
-    args: address ? [address, AJO_ADDRESS] : undefined,
-    chainId: AJO_CHAIN_ID,
-    query: { enabled: !!address },
-  });
-
-  const needsApproval = approvalNeeded > 0n && (allowance == null || allowance < approvalNeeded);
-
-  const { writeContract: writeApprove, data: approveTxHash, isPending: isApprovePending, reset: resetApprove } = useWriteContract();
-  const { isLoading: isApproveConfirming, isSuccess: isApproveSuccess } = useWaitForTransactionReceipt({ hash: approveTxHash });
-  const { writeContract: writeCreate, data: createTxHash, isPending: isCreatePending, reset: resetCreate } = useWriteContract();
+  const { writeContract: writeCreate, data: createTxHash, isPending: isCreatePending } = useWriteContract();
   const { isLoading: isCreateConfirming, isSuccess: isCreateSuccess } = useWaitForTransactionReceipt({ hash: createTxHash });
-
-  useEffect(() => {
-    if (isApproveSuccess && !approvalDone) {
-      setApprovalDone(true);
-      void refetchAllowance();
-      if (!toastShown) { toast.success('Approval confirmed'); setToastShown(true); }
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isApproveSuccess]);
 
   useEffect(() => {
     if (!isCreateSuccess || !createTxHash || createdId !== null) return;
@@ -128,17 +116,14 @@ export function CreateCircle({ onBack, onCreated }: CreateCircleProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isCreateSuccess, createTxHash]);
 
-  function handleApprove() {
-    if (wrongChain) { switchChain({ chainId: AJO_CHAIN_ID }); return; }
-    writeApprove({ address: USDC_ADDRESS, abi: erc20Abi, functionName: 'approve', args: [AJO_ADDRESS, approvalNeeded], chainId: AJO_CHAIN_ID });
-  }
-
   function handleCreate() {
     if (!isFormValid || !contributionAmount) return;
     if (wrongChain) { switchChain({ chainId: AJO_CHAIN_ID }); return; }
+    const collateralValue = collateralAmount * NATIVE_SCALE;
     writeCreate({
       address: AJO_ADDRESS, abi: AJO_ABI, functionName: 'createCircle',
-      args: [name.trim(), contributionAmount, memberCount, BigInt(effectiveDuration)],
+      args: [name.trim(), contributionAmount, memberCount, BigInt(effectiveDuration), collateralAmount, holdbackBps],
+      value: collateralValue,
       chainId: AJO_CHAIN_ID,
     });
   }
@@ -147,13 +132,20 @@ export function CreateCircle({ onBack, onCreated }: CreateCircleProps) {
     void navigator.clipboard.writeText(shareLink).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
   }
 
-  function handleReset() { resetApprove(); resetCreate(); setApprovalDone(false); setToastShown(false); }
-
-  const isBusy = isApprovePending || isApproveConfirming || isCreatePending || isCreateConfirming;
+  const isBusy = isCreatePending || isCreateConfirming;
   const isDone = isCreateSuccess && createdId !== null;
-  const isApproving = isApprovePending || isApproveConfirming;
   const isCreating = isCreatePending || isCreateConfirming;
-  const showCreateBtn = approvalDone || !needsApproval;
+
+  // Payout preview calculations
+  const previewContrib = contributionAmount ?? 0n;
+  const potPerRound = previewContrib * BigInt(memberCount);
+  function previewSlot(slotIndex: number) {
+    // slotIndex is 0-based; round = slotIndex+1
+    const roundsStillOwed = memberCount - (slotIndex + 1);
+    const holdback = (BigInt(holdbackBps) * BigInt(roundsStillOwed) * previewContrib) / 10000n;
+    const immediate = potPerRound - holdback;
+    return { immediate, holdback };
+  }
 
   if (isDone && createdId !== null) {
     return (
@@ -245,6 +237,61 @@ export function CreateCircle({ onBack, onCreated }: CreateCircleProps) {
           </div>
         </div>
 
+        {/* Trust level */}
+        <div className="rounded-2xl p-4 space-y-3" style={glass.inner}>
+          <div className="flex items-center gap-2 mb-2">
+            <Users className="size-4" style={{ color: '#d97706' }} />
+            <p className="text-xs font-semibold" style={{ color: 'var(--ink)' }}>Trust level</p>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            {TRUST_PRESETS.map((preset, i) => (
+              <button key={i} onClick={() => setSelectedPreset(i as 0 | 1 | 2)}
+                className="rounded-xl py-2.5 px-2 text-center transition-all"
+                style={{
+                  background: selectedPreset === i ? preset.color : 'rgba(255,255,255,0.5)',
+                  color: selectedPreset === i ? 'white' : 'var(--ink)',
+                  border: '1px solid',
+                  borderColor: selectedPreset === i ? preset.color : 'rgba(18,45,69,0.1)',
+                }}>
+                <p className="text-xs font-bold">{preset.label}</p>
+                <p className="text-xs opacity-80">{preset.subtitle}</p>
+              </button>
+            ))}
+          </div>
+          {/* Custom % row */}
+          <div className="flex items-center gap-2">
+            <button onClick={() => setSelectedPreset(3)}
+              className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all"
+              style={{
+                background: selectedPreset === 3 ? '#d97706' : 'rgba(255,255,255,0.5)',
+                color: selectedPreset === 3 ? 'white' : 'var(--ink)',
+                border: '1px solid',
+                borderColor: selectedPreset === 3 ? '#d97706' : 'rgba(18,45,69,0.1)',
+              }}>Custom %</button>
+            <AnimatePresence>
+              {selectedPreset === 3 && (
+                <motion.div initial={{ opacity: 0, width: 0 }} animate={{ opacity: 1, width: 'auto' }} exit={{ opacity: 0, width: 0 }} className="flex-1 overflow-hidden">
+                  <div className="relative">
+                    <input
+                      type="number" min={0} max={30} value={customBpsStr}
+                      onChange={(e) => setCustomBpsStr(e.target.value)}
+                      placeholder="0–30"
+                      className="w-full rounded-xl border py-2 pl-3 pr-10 text-sm outline-none"
+                      style={{ borderColor: 'rgba(18,45,69,0.15)', background: 'rgba(255,255,255,0.5)', color: 'var(--ink)' }}
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold" style={{ color: 'var(--subtle)' }}>%</span>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+          <p className="text-xs" style={{ color: 'var(--subtle)' }}>
+            {holdbackBps === 0
+              ? 'Friends mode: each recipient gets the full pot immediately. No amount is held back.'
+              : `${(holdbackBps / 100).toFixed(0)}% of what each recipient is still owed is held back until they pay future rounds.`}
+          </p>
+        </div>
+
         {/* Collateral toggle */}
         <div className="rounded-2xl p-4 space-y-3" style={glass.inner}>
           <div className="flex items-center justify-between gap-3">
@@ -255,7 +302,6 @@ export function CreateCircle({ onBack, onCreated }: CreateCircleProps) {
                 <p className="text-xs" style={{ color: 'var(--subtle)' }}>Held at join, refunded at cycle end</p>
               </div>
             </div>
-            {/* Toggle switch */}
             <button
               role="switch"
               aria-checked={collateralOn}
@@ -269,7 +315,6 @@ export function CreateCircle({ onBack, onCreated }: CreateCircleProps) {
               />
             </button>
           </div>
-
           <AnimatePresence>
             {collateralOn && (
               <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
@@ -298,17 +343,53 @@ export function CreateCircle({ onBack, onCreated }: CreateCircleProps) {
           </AnimatePresence>
         </div>
 
+        {/* Payout preview */}
+        {isFormValid && contributionAmount !== null && contributionAmount > 0n && (
+          <div className="rounded-2xl p-3 space-y-2" style={glass.inner}>
+            <p className="text-xs font-semibold" style={{ color: 'var(--muted)' }}>PAYOUT PREVIEW</p>
+            <div className="space-y-1.5">
+              {Array.from({ length: Math.min(memberCount, 5) }, (_, i) => {
+                const { immediate, holdback } = previewSlot(i);
+                return (
+                  <div key={i} className="flex items-center gap-2 text-xs">
+                    <span className="w-14 shrink-0 font-semibold tabular-nums" style={{ color: 'var(--subtle)' }}>
+                      Slot {i + 1}{i === memberCount - 1 ? ' (last)' : ''}
+                    </span>
+                    <span className="font-semibold tabular-nums" style={{ color: '#059669' }}>
+                      {formatUsdc(immediate)} now
+                    </span>
+                    {holdback > 0n && (
+                      <span className="tabular-nums" style={{ color: 'var(--muted)' }}>
+                        + {formatUsdc(holdback)} later
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+              {memberCount > 5 && (
+                <p className="text-xs" style={{ color: 'var(--subtle)' }}>…and {memberCount - 5} more slots</p>
+              )}
+            </div>
+            {holdbackBps > 0 && (
+              <p className="text-xs mt-1" style={{ color: 'var(--subtle)' }}>
+                "Later" is released round-by-round as they keep paying.
+              </p>
+            )}
+          </div>
+        )}
+
         {/* Summary */}
         {isFormValid && contributionAmount !== null && (
           <div className="rounded-2xl p-3" style={glass.inner}>
             <p className="text-xs font-semibold mb-1.5" style={{ color: 'var(--muted)' }}>SUMMARY</p>
             <div className="space-y-1">
               {[
-                ['Pot per round', `${formatUsdc(contributionAmount * BigInt(memberCount))} USDC`],
+                ['Pot per round', `${formatUsdc(potPerRound)} USDC`],
                 ['Total rounds', memberCount.toString()],
                 collateralOn && collateralAmount > 0n
                   ? ['Security deposit (locked at join)', `${formatUsdc(collateralAmount)} USDC`]
                   : ['Security deposit', 'None'],
+                ['Holdback', holdbackBps === 0 ? 'None (friends mode)' : `${(holdbackBps / 100).toFixed(0)}%`],
                 ['You pay today', collateralOn && collateralAmount > 0n ? `${formatUsdc(collateralAmount)} USDC` : '0 USDC'],
               ].map(([k, v]) => (
                 <div key={String(k)} className="flex justify-between text-xs">
@@ -327,29 +408,19 @@ export function CreateCircle({ onBack, onCreated }: CreateCircleProps) {
               <button onClick={() => switchChain({ chainId: AJO_CHAIN_ID })} className="w-full rounded-2xl py-3.5 text-sm font-semibold text-white" style={{ background: '#d97706' }}>
                 Switch to Arc Testnet
               </button>
-            ) : isApproving ? (
-              <div className="rounded-2xl p-3 text-center text-sm" style={glass.inner}>
-                {isApprovePending ? 'Confirm approval in wallet...' : 'Confirming approval...'}
-              </div>
             ) : isCreating ? (
               <div className="rounded-2xl p-3 text-center text-sm" style={glass.inner}>
-                {isCreatePending ? 'Confirm in wallet...' : 'Creating circle on-chain...'}
+                {isCreatePending ? 'Waiting for wallet…' : 'Creating circle on-chain…'}
               </div>
-            ) : showCreateBtn ? (
-              <button onClick={handleCreate} disabled={!isFormValid || isBusy} className="w-full rounded-2xl py-3.5 text-sm font-semibold text-white disabled:opacity-40" style={{ background: 'linear-gradient(135deg, #d97706 0%, #059669 100%)' }}>
-                Create circle
-              </button>
             ) : (
-              <button onClick={handleApprove} disabled={!isFormValid || isBusy} className="w-full rounded-2xl py-3.5 text-sm font-semibold text-white disabled:opacity-40" style={{ background: 'linear-gradient(135deg, #d97706 0%, #059669 100%)' }}>
-                Allow USDC &amp; Continue
+              <button onClick={handleCreate} disabled={!isFormValid || isBusy} className="w-full rounded-2xl py-3.5 text-sm font-semibold text-white disabled:opacity-40" style={{ background: 'linear-gradient(135deg, #d97706 0%, #059669 100%)' }}>
+                {collateralAmount > 0n
+                  ? `Create circle (send ${formatUsdc(collateralAmount)} USDC deposit)`
+                  : 'Create circle'}
               </button>
             )}
           </motion.div>
         </AnimatePresence>
-
-        {!isBusy && approveTxHash && !isApproveSuccess && !isCreateSuccess && (
-          <button onClick={handleReset} className="w-full text-center text-xs" style={{ color: 'var(--subtle)' }}>Try again</button>
-        )}
       </motion.div>
     </div>
   );

@@ -10,13 +10,17 @@ A rotating savings group (ajo/esusu) dapp where groups of 2–10 members save to
 
 | Contract | Chain | Address | Explorer |
 |---|---|---|---|
-| AjoCircle | Arc Testnet | `0xdcef975947fc86f344164dab25af4aaaceb9f0ca` | [View](https://explorer.testnet.arc.io/address/0xdcef975947fc86f344164dab25af4aaaceb9f0ca) |
+| AjoCircle v1 (deprecated) | Arc Testnet | `0xdcef975947fc86f344164dab25af4aaaceb9f0ca` | [View](https://explorer.testnet.arc.io/address/0xdcef975947fc86f344164dab25af4aaaceb9f0ca) |
+| AjoCircle v2 (deprecated) | Arc Testnet | `0xd78cd3378823ed3963a95ea4f9d88352001b8b62` | [View](https://explorer.testnet.arc.io/address/0xd78cd3378823ed3963a95ea4f9d88352001b8b62) |
+| AjoCircle v3 (deprecated) | Arc Testnet | `0xf4a21b74f442f9672a1787fed6ebfcdfb73cd8a2` | [View](https://explorer.testnet.arc.io/address/0xf4a21b74f442f9672a1787fed6ebfcdfb73cd8a2) |
+| AjoCircle v4 (deprecated) | Arc Testnet | `0x1db5c7c8f2ab1bb84674024e952a151240e136ab` | [View](https://explorer.testnet.arc.io/address/0x1db5c7c8f2ab1bb84674024e952a151240e136ab) |
+| AjoCircle v5 (Fix 6: holdbackBps, reputation, trust levels) | Arc Testnet | `0x64822c48a4de920e74d16df88cb3b0b6924819d6` | [View](https://explorer.testnet.arc.io/address/0x64822c48a4de920e74d16df88cb3b0b6924819d6) |
 
 ## Tech Stack
 
 - Frontend: React 18, Vite, TypeScript, Tailwind CSS
 - Web3: wagmi v2, viem v2, ConnectKit
-- Contracts: Solidity 0.8.28 + Foundry. Sources in `contracts/`, unit tests in `contracts/test/AjoCircle.t.sol` (38/38 pass).
+- Contracts: Solidity 0.8.28 + Foundry. Sources in `contracts/`, unit tests in `contracts/test/` (50/50 pass).
 - Chain: Arc Testnet (Chain ID: 5042002)
 - USDC: `0x3600000000000000000000000000000000000000` (6 decimals, Arc Testnet)
 

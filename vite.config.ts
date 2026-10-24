@@ -9,7 +9,7 @@ export default defineConfig({
     // Bake the deployed contract address into the production build so it
     // works on public hosting without a .env file.
     'import.meta.env.VITE_AJO_ADDRESS': JSON.stringify(
-      process.env.VITE_AJO_ADDRESS ?? '0xdcef975947fc86f344164dab25af4aaaceb9f0ca'
+      process.env.VITE_AJO_ADDRESS ?? '0x64822c48a4de920e74d16df88cb3b0b6924819d6'
     ),
     // Public URL for invite links — must be set to the deployed Vercel/Netlify URL.
     // Falls back to empty string in dev/preview; invite button then copies just "#circle/N"

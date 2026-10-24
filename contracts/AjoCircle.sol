@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 contract AjoCircle is ReentrancyGuard {
-    using SafeERC20 for IERC20;
+    uint256 public constant MIN_ROUND_DURATION = 300;
+    address public constant USDC = 0x3600000000000000000000000000000000000000;
+    uint16 public constant MAX_HOLDBACK_BPS = 3000; // 30%
+    uint256 private constant NATIVE_SCALE = 1e12; // 1 native USDC = 1e12 ERC-20 units (18 dec vs 6 dec)
+    // Note: native USDC sent outside the protocol entry points (e.g. via selfdestruct) cannot be
+    // recovered. This is an accepted limitation of a no-admin design; selfdestruct is deprecated
+    // on most EVM chains and the risk is negligible on Arc Testnet.
 
     enum CircleStatus {
         PENDING,
@@ -20,12 +24,14 @@ contract AjoCircle is ReentrancyGuard {
         uint256 contributionAmount;
         uint8 memberCount;
         uint256 roundDuration;
+        uint256 collateralAmount; // 0 = no deposit required at join
+        uint16 holdbackBps; // 0-3000, basis points of holdback from payout
         CircleStatus status;
         uint8 currentRound; // 1-indexed; 0 = not started
         uint256 roundDeadline;
-        address[] members; // join order
-        address[] payoutRecipients; // payout order
-        bool[] defaulted; // indexed by member position
+        address[] members;
+        address[] payoutRecipients;
+        bool[] defaulted;
     }
 
     event CircleCreated(
@@ -34,7 +40,9 @@ contract AjoCircle is ReentrancyGuard {
         string name,
         uint256 contributionAmount,
         uint8 memberCount,
-        uint256 roundDuration
+        uint256 roundDuration,
+        uint256 collateralAmount,
+        uint16 holdbackBps
     );
     event MemberJoined(uint256 indexed circleId, address indexed member, uint8 position);
     event CircleStarted(uint256 indexed circleId, uint256 roundDeadline);
@@ -42,9 +50,9 @@ contract AjoCircle is ReentrancyGuard {
     event RoundPayout(uint256 indexed circleId, uint8 indexed round, address indexed recipient, uint256 amount);
     event MemberDefaulted(uint256 indexed circleId, address indexed member, uint8 round);
     event CollateralSlashed(uint256 indexed circleId, address indexed member, uint256 amount);
-    event BondLocked(uint256 indexed circleId, address indexed member, uint256 amount);
-    event BondReleased(uint256 indexed circleId, address indexed member, uint256 amount);
-    event BondSlashed(uint256 indexed circleId, address indexed member, uint256 amount, address recipient);
+    event HoldbackLocked(uint256 indexed circleId, address indexed member, uint256 amount);
+    event HoldbackReleased(uint256 indexed circleId, address indexed member, uint256 amount);
+    event HoldbackSlashed(uint256 indexed circleId, address indexed member, uint256 amount, address recipient);
     event CollateralRefunded(uint256 indexed circleId, address indexed member, uint256 amount);
     event CircleEnded(uint256 indexed circleId);
     event CircleCancelled(uint256 indexed circleId);
@@ -54,6 +62,7 @@ contract AjoCircle is ReentrancyGuard {
     error InvalidContributionAmount();
     error InvalidMemberCount();
     error InvalidRoundDuration();
+    error InvalidHoldbackBps();
     error CircleNotPending();
     error CircleNotActive();
     error CircleEndedAlready();
@@ -66,57 +75,68 @@ contract AjoCircle is ReentrancyGuard {
     error MemberDefaultedAlready();
     error ContributionsStillPending();
     error NothingToWithdraw();
-
-    uint256 public constant MIN_ROUND_DURATION = 300;
-    address public constant USDC = 0x3600000000000000000000000000000000000000;
-
-    IERC20 private constant USDC_TOKEN = IERC20(USDC);
+    error IncorrectPayment();
 
     uint256 public circleCount;
     mapping(uint256 => Circle) public circles;
-
     mapping(uint256 => mapping(uint8 => mapping(address => bool))) public roundPaid;
     mapping(uint256 => mapping(address => bool)) public isDefaulted;
-    mapping(uint256 => mapping(address => uint256)) public memberDeposit;
-    mapping(uint256 => mapping(address => uint256)) public memberBond;
+    mapping(uint256 => mapping(address => uint256)) public memberDeposit; // collateral locked at join
+    mapping(uint256 => mapping(address => uint256)) public memberHoldback; // holdback locked at payout
     mapping(uint256 => mapping(address => uint256)) public memberIndex;
     mapping(uint256 => mapping(address => bool)) public isMember;
     mapping(uint256 => mapping(uint8 => uint256)) private roundPot;
     mapping(address => uint256) public pendingWithdrawals;
 
+    // Global reputation counters (incremented across all circles)
+    mapping(address => uint256) public totalRoundsPaid;
+    mapping(address => uint256) public totalRoundsMissed;
+    mapping(address => uint256) public totalCirclesCompleted;
+
     function createCircle(
         string calldata name,
         uint256 contributionAmount,
         uint8 memberCount,
-        uint256 roundDuration
-    ) external nonReentrant returns (uint256 circleId) {
+        uint256 roundDuration,
+        uint256 collateralAmount,
+        uint16 holdbackBps
+    ) external payable nonReentrant returns (uint256 circleId) {
         if (contributionAmount == 0) revert InvalidContributionAmount();
         if (memberCount < 2 || memberCount > 10) revert InvalidMemberCount();
         if (roundDuration < MIN_ROUND_DURATION) revert InvalidRoundDuration();
+        if (holdbackBps > MAX_HOLDBACK_BPS) revert InvalidHoldbackBps();
 
         circleId = ++circleCount;
-
         Circle storage circle = circles[circleId];
         circle.name = name;
         circle.creator = msg.sender;
         circle.contributionAmount = contributionAmount;
         circle.memberCount = memberCount;
         circle.roundDuration = roundDuration;
+        circle.collateralAmount = collateralAmount;
+        circle.holdbackBps = holdbackBps;
         circle.status = CircleStatus.PENDING;
 
-        emit CircleCreated(circleId, msg.sender, name, contributionAmount, memberCount, roundDuration);
-
+        emit CircleCreated(
+            circleId,
+            msg.sender,
+            name,
+            contributionAmount,
+            memberCount,
+            roundDuration,
+            collateralAmount,
+            holdbackBps
+        );
         _join(circleId, msg.sender);
     }
 
-    function join(uint256 circleId) external nonReentrant {
+    function join(uint256 circleId) external payable nonReentrant {
         _join(circleId, msg.sender);
     }
 
     function cancelCircle(uint256 circleId) external nonReentrant {
         Circle storage circle = circles[circleId];
         _requireValidCircle(circleId);
-
         if (circle.status != CircleStatus.PENDING) revert CircleNotPending();
         if (circle.creator != msg.sender) revert NotCreator();
 
@@ -124,21 +144,21 @@ contract AjoCircle is ReentrancyGuard {
         for (uint256 i = 0; i < len; i++) {
             address member = circle.members[i];
             uint256 toRefund = memberDeposit[circleId][member];
-            pendingWithdrawals[member] += toRefund;
-            memberDeposit[circleId][member] = 0;
-            emit CollateralRefunded(circleId, member, toRefund);
+            if (toRefund > 0) {
+                memberDeposit[circleId][member] = 0;
+                pendingWithdrawals[member] += toRefund;
+                emit CollateralRefunded(circleId, member, toRefund);
+            }
         }
 
         circle.status = CircleStatus.ENDED;
         circle.roundDeadline = 0;
-
         emit CircleCancelled(circleId);
     }
 
-    function contribute(uint256 circleId) external nonReentrant {
+    function contribute(uint256 circleId) external payable nonReentrant {
         Circle storage circle = circles[circleId];
         _requireValidCircle(circleId);
-
         if (circle.status != CircleStatus.ACTIVE) revert CircleNotActive();
         if (!isMember[circleId][msg.sender]) revert NotMember();
         if (isDefaulted[circleId][msg.sender]) revert MemberDefaultedAlready();
@@ -147,19 +167,27 @@ contract AjoCircle is ReentrancyGuard {
         if (roundPaid[circleId][round][msg.sender]) revert AlreadyContributed();
         if (circle.roundDeadline > 0 && block.timestamp > circle.roundDeadline) revert RoundDeadlinePassed();
 
-        USDC_TOKEN.safeTransferFrom(msg.sender, address(this), circle.contributionAmount);
+        if (msg.value != circle.contributionAmount * NATIVE_SCALE) revert IncorrectPayment();
 
         roundPaid[circleId][round][msg.sender] = true;
         roundPot[circleId][round] += circle.contributionAmount;
+        totalRoundsPaid[msg.sender]++;
 
         emit ContributionMade(circleId, round, msg.sender, circle.contributionAmount);
 
-        if (memberBond[circleId][msg.sender] > 0) {
-            uint256 release = circle.contributionAmount;
-            if (release > memberBond[circleId][msg.sender]) release = memberBond[circleId][msg.sender];
-            memberBond[circleId][msg.sender] -= release;
-            pendingWithdrawals[msg.sender] += release;
-            emit BondReleased(circleId, msg.sender, release);
+        // Release holdback pro-rata: one round's share of their holdback
+        uint256 hb = memberHoldback[circleId][msg.sender];
+        if (hb > 0) {
+            // The holdback was sized as holdbackBps * (roundsOwed * contribution) / 10000 at payout time.
+            // Each subsequent round they pay, release contributionAmount * holdbackBps / 10000.
+            uint256 releasePerRound = (circle.contributionAmount * circle.holdbackBps) / 10000;
+            if (releasePerRound == 0) releasePerRound = 0; // no-op but explicit
+            uint256 toRelease = releasePerRound < hb ? releasePerRound : hb;
+            if (toRelease > 0) {
+                memberHoldback[circleId][msg.sender] -= toRelease;
+                pendingWithdrawals[msg.sender] += toRelease;
+                emit HoldbackReleased(circleId, msg.sender, toRelease);
+            }
         }
     }
 
@@ -176,9 +204,11 @@ contract AjoCircle is ReentrancyGuard {
         bool recipientAlreadyDefaulted = isDefaulted[circleId][recipient];
 
         if (block.timestamp < circle.roundDeadline) {
+            // Early payout: all non-defaulted, non-recipient members must have paid
             uint256 mLen = circle.members.length;
             for (uint256 i = 0; i < mLen; i++) {
                 address member = circle.members[i];
+                if (member == recipient) continue;
                 if (!isDefaulted[circleId][member] && !roundPaid[circleId][round][member]) {
                     revert ContributionsStillPending();
                 }
@@ -187,38 +217,26 @@ contract AjoCircle is ReentrancyGuard {
             pot += _slashDefaulters(circleId, round);
         }
 
-        // recipientAlreadyDefaulted = true means they were excluded in a PRIOR round
-        // (before their payout slot). Skip their payout; carry pot forward.
-        // recipientAlreadyDefaulted = false means they are either:
-        //   (a) paid this round — normal payout
-        //   (b) missed this round (just marked by _slashDefaulters OR post-payout miss)
-        //   Either way, they receive the pot minus their own missed share (if any).
         if (recipientAlreadyDefaulted) {
-            // Skip permanently defaulted recipient
+            // Recipient was permanently excluded before this round — skip, carry pot forward
             if (round < circle.memberCount) {
                 roundPot[circleId][round + 1] += pot;
             } else {
-                _distributeToContributors(circleId, round, pot);
+                _terminalPotDistribution(circleId, round, pot);
             }
         } else {
-            // Recipient is eligible — check if they missed THIS round
-            bool recipientMissed = !roundPaid[circleId][round][recipient];
-            if (recipientMissed) {
-                uint256 deduct = circle.contributionAmount;
-                if (deduct > pot) deduct = pot;
-                pot -= deduct;
-            }
+            // Compute holdback: holdbackBps * (roundsStillOwed * contributionAmount) / 10000
+            // roundsStillOwed = rounds AFTER this one (the recipient already received, so they owe rounds remaining)
+            uint8 roundsStillOwed = circle.memberCount - round; // last recipient: 0 rounds owed → holdback = 0
+            uint256 holdback = (uint256(circle.holdbackBps) * uint256(roundsStillOwed) * circle.contributionAmount) / 10000;
+            if (holdback > pot) holdback = pot;
 
-            uint8 roundsRemaining = circle.memberCount - round;
-            uint256 bond = uint256(roundsRemaining) * circle.contributionAmount;
-            if (bond > pot) bond = pot;
-
-            uint256 recipientReceives = pot - bond;
+            uint256 recipientReceives = pot - holdback;
             pendingWithdrawals[recipient] += recipientReceives;
-            memberBond[circleId][recipient] += bond;
+            memberHoldback[circleId][recipient] += holdback;
 
             if (pot > 0) emit RoundPayout(circleId, round, recipient, recipientReceives);
-            if (bond > 0) emit BondLocked(circleId, recipient, bond);
+            if (holdback > 0) emit HoldbackLocked(circleId, recipient, holdback);
         }
 
         circle.currentRound = round + 1;
@@ -234,10 +252,10 @@ contract AjoCircle is ReentrancyGuard {
     function withdraw() external nonReentrant {
         uint256 amount = pendingWithdrawals[msg.sender];
         if (amount == 0) revert NothingToWithdraw();
-
         pendingWithdrawals[msg.sender] = 0;
-        USDC_TOKEN.safeTransfer(msg.sender, amount);
-
+        // pendingWithdrawals is in 6-decimal units; convert to native 18-decimal for transfer
+        (bool ok,) = payable(msg.sender).call{value: amount * NATIVE_SCALE}("");
+        if (!ok) revert NothingToWithdraw(); // reuse error; transfer failure is the only failure mode
         emit Withdrawn(msg.sender, amount);
     }
 
@@ -308,9 +326,9 @@ contract AjoCircle is ReentrancyGuard {
         return memberDeposit[circleId][member];
     }
 
-    function getMemberBond(uint256 circleId, address member) external view returns (uint256) {
+    function getMemberHoldback(uint256 circleId, address member) external view returns (uint256) {
         _requireValidCircle(circleId);
-        return memberBond[circleId][member];
+        return memberHoldback[circleId][member];
     }
 
     function getRoundDeadline(uint256 circleId) external view returns (uint256) {
@@ -324,22 +342,28 @@ contract AjoCircle is ReentrancyGuard {
         return roundPot[circleId][circle.currentRound];
     }
 
+    function getMemberReputation(address member) external view returns (uint256 paid, uint256 missed, uint256 completed) {
+        return (totalRoundsPaid[member], totalRoundsMissed[member], totalCirclesCompleted[member]);
+    }
+
     function _join(uint256 circleId, address member) internal {
         Circle storage circle = circles[circleId];
         _requireValidCircle(circleId);
-
         if (isMember[circleId][member]) revert AlreadyMember();
         if (circle.members.length >= circle.memberCount) revert CircleFull();
         if (circle.status != CircleStatus.PENDING) revert CircleNotPending();
 
-        USDC_TOKEN.safeTransferFrom(member, address(this), circle.contributionAmount);
-        memberDeposit[circleId][member] = circle.contributionAmount;
+        if (circle.collateralAmount > 0) {
+            if (msg.value != circle.collateralAmount * NATIVE_SCALE) revert IncorrectPayment();
+            memberDeposit[circleId][member] = circle.collateralAmount;
+        } else {
+            if (msg.value != 0) revert IncorrectPayment();
+        }
 
         uint256 index = circle.members.length;
         circle.members.push(member);
         circle.payoutRecipients.push(member);
         circle.defaulted.push(false);
-
         isMember[circleId][member] = true;
         memberIndex[circleId][member] = index;
 
@@ -349,7 +373,6 @@ contract AjoCircle is ReentrancyGuard {
             circle.status = CircleStatus.ACTIVE;
             circle.currentRound = 1;
             circle.roundDeadline = block.timestamp + circle.roundDuration;
-
             emit CircleStarted(circleId, circle.roundDeadline);
         }
     }
@@ -357,51 +380,49 @@ contract AjoCircle is ReentrancyGuard {
     function _slashDefaulters(uint256 circleId, uint8 round) private returns (uint256 additionalPot) {
         Circle storage circle = circles[circleId];
         uint256 mLen = circle.members.length;
+        address roundRecipient = circle.payoutRecipients[round - 1];
 
         for (uint256 i = 0; i < mLen; i++) {
             address member = circle.members[i];
             if (isDefaulted[circleId][member]) continue;
             if (roundPaid[circleId][round][member]) continue;
+            if (member == roundRecipient) continue; // recipient is never slashed for missing their own round
 
-            if (memberBond[circleId][member] > 0) {
-                uint256 slash = circle.contributionAmount;
-                if (slash > memberBond[circleId][member]) slash = memberBond[circleId][member];
-                memberBond[circleId][member] -= slash;
-                additionalPot += slash;
-                emit BondSlashed(circleId, member, slash, address(0));
+            // Mark defaulter and increment reputation counter
+            totalRoundsMissed[member]++;
+
+            uint256 slash = circle.contributionAmount;
+            uint256 hb = memberHoldback[circleId][member];
+            uint256 dep = memberDeposit[circleId][member];
+
+            uint256 fromHoldback = 0;
+            uint256 fromDeposit = 0;
+
+            if (hb >= slash) {
+                fromHoldback = slash;
             } else {
-                isDefaulted[circleId][member] = true;
-                uint256 idx = memberIndex[circleId][member];
-                circle.defaulted[idx] = true;
-                emit MemberDefaulted(circleId, member, round);
-
-                uint256 slash = circle.contributionAmount;
-                if (slash > memberDeposit[circleId][member]) slash = memberDeposit[circleId][member];
-                memberDeposit[circleId][member] -= slash;
-                additionalPot += slash;
-                emit CollateralSlashed(circleId, member, slash);
+                fromHoldback = hb;
+                uint256 remaining = slash - fromHoldback;
+                fromDeposit = remaining <= dep ? remaining : dep;
             }
-        }
-    }
 
-    function _distributeToContributors(uint256 circleId, uint8 round, uint256 pot) private {
-        if (pot == 0) return;
-        Circle storage circle = circles[circleId];
-        uint256 mLen = circle.members.length;
-        uint256 count = 0;
-        for (uint256 i = 0; i < mLen; i++) {
-            if (roundPaid[circleId][round][circle.members[i]]) count++;
-        }
-        if (count == 0) return;
-        uint256 share = pot / count;
-        uint256 rem = pot % count;
-        bool first = true;
-        for (uint256 i = 0; i < mLen; i++) {
-            address m = circle.members[i];
-            if (!roundPaid[circleId][round][m]) continue;
-            uint256 amt = share + (first ? rem : 0);
-            first = false;
-            pendingWithdrawals[m] += amt;
+            if (fromHoldback > 0) {
+                memberHoldback[circleId][member] -= fromHoldback;
+                emit HoldbackSlashed(circleId, member, fromHoldback, roundRecipient);
+            }
+            if (fromDeposit > 0) {
+                memberDeposit[circleId][member] -= fromDeposit;
+                emit CollateralSlashed(circleId, member, fromDeposit);
+            }
+
+            additionalPot += fromHoldback + fromDeposit;
+
+            // Permanently exclude only when both holdback and deposit are exhausted
+            if (memberHoldback[circleId][member] == 0 && memberDeposit[circleId][member] == 0) {
+                isDefaulted[circleId][member] = true;
+                circle.defaulted[memberIndex[circleId][member]] = true;
+                emit MemberDefaulted(circleId, member, round);
+            }
         }
     }
 
@@ -413,16 +434,67 @@ contract AjoCircle is ReentrancyGuard {
         uint256 len = circle.members.length;
         for (uint256 i = 0; i < len; i++) {
             address member = circle.members[i];
-            uint256 toRefund = memberBond[circleId][member] + memberDeposit[circleId][member];
+            uint256 toRefund = memberHoldback[circleId][member] + memberDeposit[circleId][member];
             if (toRefund > 0) {
-                memberBond[circleId][member] = 0;
+                memberHoldback[circleId][member] = 0;
                 memberDeposit[circleId][member] = 0;
                 pendingWithdrawals[member] += toRefund;
                 emit CollateralRefunded(circleId, member, toRefund);
             }
+            // Increment circlesCompleted for non-permanently-defaulted members
+            if (!isDefaulted[circleId][member]) {
+                totalCirclesCompleted[member]++;
+            }
         }
 
         emit CircleEnded(circleId);
+    }
+
+    function _terminalPotDistribution(uint256 circleId, uint8 round, uint256 pot) private {
+        if (pot == 0) return;
+        Circle storage circle = circles[circleId];
+        uint256 mLen = circle.members.length;
+
+        // Try contributors first
+        uint256 count = 0;
+        for (uint256 i = 0; i < mLen; i++) {
+            if (roundPaid[circleId][round][circle.members[i]]) count++;
+        }
+        if (count > 0) {
+            uint256 share = pot / count;
+            uint256 rem = pot % count;
+            bool first = true;
+            for (uint256 i = 0; i < mLen; i++) {
+                address m = circle.members[i];
+                if (!roundPaid[circleId][round][m]) continue;
+                uint256 amt = share + (first ? rem : 0);
+                first = false;
+                pendingWithdrawals[m] += amt;
+            }
+            return;
+        }
+
+        // No contributors — try non-defaulted members
+        uint256 eligible = 0;
+        for (uint256 i = 0; i < mLen; i++) {
+            if (!isDefaulted[circleId][circle.members[i]]) eligible++;
+        }
+        if (eligible > 0) {
+            uint256 share = pot / eligible;
+            uint256 rem = pot % eligible;
+            bool first = true;
+            for (uint256 i = 0; i < mLen; i++) {
+                address m = circle.members[i];
+                if (isDefaulted[circleId][m]) continue;
+                uint256 amt = share + (first ? rem : 0);
+                first = false;
+                pendingWithdrawals[m] += amt;
+            }
+            return;
+        }
+
+        // All defaulted — last-resort sink: circle creator
+        pendingWithdrawals[circle.creator] += pot;
     }
 
     function _requireValidCircle(uint256 circleId) internal view {
