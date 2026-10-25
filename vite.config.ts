@@ -15,7 +15,7 @@ export default defineConfig({
     // Falls back to empty string in dev/preview; invite button then copies just "#circle/N"
     // which users can paste into the home-page "Join by ID" box.
     'import.meta.env.VITE_PUBLIC_URL': JSON.stringify(
-      process.env.VITE_PUBLIC_URL ?? 'https://ajo-usdc.vercel.app'
+      process.env.VITE_PUBLIC_URL ?? ''
     ),
   },
   resolve: {
