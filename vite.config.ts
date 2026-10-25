@@ -11,9 +11,8 @@ export default defineConfig({
     'import.meta.env.VITE_AJO_ADDRESS': JSON.stringify(
       process.env.VITE_AJO_ADDRESS ?? '0x64822c48a4de920e74d16df88cb3b0b6924819d6'
     ),
-    // Public URL for invite links — must be set to the deployed Vercel/Netlify URL.
-    // Falls back to empty string in dev/preview; invite button then copies just "#circle/N"
-    // which users can paste into the home-page "Join by ID" box.
+    // Optional override for invite links. When empty, invite links use the
+    // current site's origin (location.origin).
     'import.meta.env.VITE_PUBLIC_URL': JSON.stringify(
       process.env.VITE_PUBLIC_URL ?? ''
     ),
@@ -36,7 +35,6 @@ export default defineConfig({
       'wagmi/connectors',
       'viem',
       'viem/chains',
-      'connectkit',
       'framer-motion',
       'lucide-react',
       'sonner',
