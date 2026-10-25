@@ -8,5 +8,5 @@ contracts/out/
 contracts/cache/
 cache/
 out/
-lib/
+/lib/
 .agents/
