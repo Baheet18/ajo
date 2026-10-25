@@ -88,7 +88,7 @@ export function HomePage({ onCreateCircle, onMyCircles }: HomePageProps) {
           ) : (
             <div className="flex flex-col items-center gap-3">
               <p className="text-xs" style={{ color: 'var(--subtle)' }}>
-                Connect your wallet to get started
+                Sign in with email or Google to get started
               </p>
               <WalletButton />
             </div>

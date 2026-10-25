@@ -8,9 +8,9 @@
  * return 404. Locking it to one URL prevents that.
  */
 
-import { http, createConfig } from 'wagmi'
+import { http } from 'wagmi'
+import { createConfig } from '@privy-io/wagmi'
 import { defineChain } from 'viem'
-import { injected } from 'wagmi/connectors'
 import { registerChain } from './tracing'
 
 const ARC_TESTNET_RPC = 'https://rpc.testnet.arc.io'
@@ -35,7 +35,6 @@ registerChain(arcTestnetChain.id, ARC_TESTNET_RPC)
 
 export const config = createConfig({
   chains: [arcTestnetChain],
-  connectors: [injected()],
   transports: {
     [arcTestnetChain.id]: http(ARC_TESTNET_RPC),
   },

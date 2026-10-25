@@ -25,6 +25,8 @@
     "@circle-fin/user-controlled-wallets": "^10.8.0",
     "@circle-fin/w3s-pw-web-sdk": "^1.1.11",
     "@openzeppelin/contracts": "5.1.0",
+    "@privy-io/react-auth": "^3.51.0",
+    "@privy-io/wagmi": "^4.0.19",
     "@tanstack/react-query": "^5.62.7",
     "@web3icons/react": "^4.0.0",
     "clsx": "^2.1.1",

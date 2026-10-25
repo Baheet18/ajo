@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { WalletButton } from '@/components/WalletButton';
+import { WalletButton, FundWalletCard } from '@/components/WalletButton';
 import { motion, AnimatePresence } from 'framer-motion';
 import { HomePage } from '@/components/HomePage';
 import { CreateCircle } from '@/components/CreateCircle';
@@ -105,6 +105,7 @@ export default function App() {
 
       {/* Main */}
       <main className="relative z-10 mx-auto max-w-md px-4 pb-12 pt-6">
+        <FundWalletCard />
         <AnimatePresence mode="wait">
           <motion.div
             key={view.page + (view.page === 'circle' ? view.id.toString() : '')}
