@@ -19,3 +19,4 @@ contracts/cache/
 # Misc
 .DS_Store
 *.log
+*.jsonl
